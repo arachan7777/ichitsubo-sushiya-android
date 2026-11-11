@@ -2,6 +2,9 @@ name: Android APK を作成
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/build-trigger.txt'
 
 permissions:
   contents: read
@@ -51,6 +54,15 @@ jobs:
             app/src/main/java/jp/ichitsubo/sushiya/GameEngine.java \
             test/GameRulesTest.java
           java -cp .build/test GameRulesTest
+      - name: 一坪寿司屋のゲーム本編テスト
+        shell: bash
+        run: |
+          mkdir -p .build/worldtest
+          javac -encoding UTF-8 -d .build/worldtest \
+            app/src/main/java/jp/ichitsubo/sushiya/Catalog.java \
+            app/src/main/java/jp/ichitsubo/sushiya/SushiWorld.java \
+            test/SushiWorldTest.java
+          java -cp .build/worldtest SushiWorldTest
       - name: デバッグ用APKをビルド
         shell: bash
         run: gradle --no-daemon :app:assembleDebug --stacktrace
