@@ -23,8 +23,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK の準備
-        uses: android-actions/setup-android@v3
+      - name: GitHub標準Android SDKを確認
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          command -v sdkmanager
+          sdkmanager --version
       - name: Android SDK 35 の導入
         shell: bash
         run: |
