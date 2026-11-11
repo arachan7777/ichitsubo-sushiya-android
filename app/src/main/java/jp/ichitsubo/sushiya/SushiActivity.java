@@ -318,7 +318,7 @@ public final class SushiActivity extends Activity {
             if(!game.introduced[i])continue;
             Catalog.Fish fav=Catalog.fish(c.favorite);
             add(c.name+"  Lv"+game.level(i)+"  "+game.tier(i),()->{
-                toast(c.name()+"\n関係値："+game.relation[id]+" / 900でLv10"
+                toast(c.name+"\n関係値："+game.relation[id]+" / 900でLv10"
                     +"\n好物："+(fav==null?"":fav.name)
                     +"\n好みの曜日："+weekdays(c.weekdayMask)+"\n個別の物語は制作途中。");
             });
