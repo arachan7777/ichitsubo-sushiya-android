@@ -7,7 +7,16 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.os.SystemClock;
+import android.view.MotionEvent;
 import android.view.View;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** Crisp nearest-neighbor pixel art drawn entirely on device; no network or image service. */
 public final class PixelShopView extends View {
@@ -15,10 +24,53 @@ public final class PixelShopView extends View {
     private final Canvas art=new Canvas(bitmap);
     private final Paint p=new Paint();
     private SushiWorld world;
-    private int mode=0,portrait=-1;
+    private int mode=0;
+    private boolean cooking=false;
+    private final Map<Integer,Long> entering=new HashMap<>();
+    private final Map<Integer,Integer> previousSeats=new HashMap<>();
+    private final List<Departure> departing=new ArrayList<>();
+    private CustomerTapListener tapListener;
     private static final int INK=0xff14232c, NIGHT=0xff182d3a, WOOD=0xff965332;
+    private static final long WALK_MS=2200L, LEAVE_MS=1900L;
+    public interface CustomerTapListener { void onCustomerTap(SushiWorld.Customer customer); }
+    private static final class Departure {
+        final int id,startingX;final long when;
+        Departure(int id,int start,long time){this.id=id;startingX=start;when=time;}
+    }
     public PixelShopView(Context c,SushiWorld w){super(c);world=w;setLayerType(View.LAYER_TYPE_SOFTWARE,null);}
-    public void update(SushiWorld w,int newMode){world=w;mode=newMode;invalidate();}
+    public void setCustomerTapListener(CustomerTapListener cb){tapListener=cb;setClickable(true);}
+    public void setCooking(boolean value){cooking=value;invalidate();}
+    public void update(SushiWorld w,int newMode){
+        world=w;mode=newMode;
+        syncCustomers(SystemClock.uptimeMillis());
+        invalidate();
+    }
+    private void syncCustomers(long now){
+        Set<Integer> actual=new HashSet<>();
+        for(int j=0;j<world.seated.size();j++){
+            SushiWorld.Customer c=world.seated.get(j);
+            actual.add(c.index);
+            if(!entering.containsKey(c.index))entering.put(c.index,now);
+            previousSeats.put(c.index,j);
+        }
+        Iterator<Map.Entry<Integer,Long>> it=entering.entrySet().iterator();
+        while(it.hasNext()){
+            Map.Entry<Integer,Long> item=it.next();
+            if(!actual.contains(item.getKey())){
+                int slot=previousSeats.containsKey(item.getKey())?previousSeats.get(item.getKey()):0;
+                departing.add(new Departure(item.getKey(),48+slot*54,now));
+                previousSeats.remove(item.getKey());
+                it.remove();
+            }
+        }
+        for(Iterator<Departure> d=departing.iterator();d.hasNext();)
+            if(now-d.next().when>LEAVE_MS)d.remove();
+    }
+    private float progress(long elapsed,long duration){
+        return Math.max(0f,Math.min(1f,elapsed/(float)duration));
+    }
+    private int walkStep(long now){return (int)((now/205L)%2L);}
+
     private void rect(int color,float x,float y,float w,float h){p.setColor(color);p.setStyle(Paint.Style.FILL);art.drawRect(x,y,x+w,y+h,p);}
     private void edge(int x,int y,int w,int h,int col){rect(INK,x-2,y-2,w+4,h+4);rect(col,x,y,w,h);}
     private void text(String value,int color,int size,float x,float y){
@@ -52,6 +104,9 @@ public final class PixelShopView extends View {
         rect(c,x+1,y,20,7);rect(0xfff2ceb0,x+4,y+1,11,2);
     }
     private void person(int index,int x,int y,boolean chef,boolean sitting){
+        person(index,x,y,chef,sitting,0);
+    }
+    private void person(int index,int x,int y,boolean chef,boolean sitting,int step){
         int skin=(index%4==0)?0xffeab591:(index%4==1)?0xffd9a17f:0xfff1c3a4;
         int hair=new int[]{0xff272c32,0xff55403a,0xff7d4a35,0xff3c4849,0xff815847}[Math.abs(index)%5];
         int cloth=chef?0xfff4ecdc:new int[]{0xff9b5e59,0xff436d7a,0xff6f7650,0xff8d719d,0xffbb8e4f,0xffb76744}[Math.abs(index)%6];
@@ -67,7 +122,12 @@ public final class PixelShopView extends View {
             rect(0xfff6f4e8,x,y-6,18,7);rect(0xfff6f4e8,x+3,y-11,12,8);
             rect(0xfff3f0e4,x+3,y+12,12,16);rect(0xffb8c9be,x+8,y+17,2,12);
         }else if(index%5==0){rect(0xffd9ba77,x,y-3,18,3);}
-        rect(0xfff5ddbc,x+1,y+23,3,5);rect(0xfff5ddbc,x+16,y+23,3,5);
+        rect(0xfff5ddbc,x+1,y+23+(step==1?2:0),3,5);
+        rect(0xfff5ddbc,x+16,y+23+(step==0?2:0),3,5);
+        if(step>0&&!sitting&&!chef){
+            rect(0xff252d30,x+1,y+height-2,6,6);
+            rect(0xff252d30,x+11,y+height+1,6,4);
+        }
     }
     private void tiles(){
         rect(0xff3a3d3e,0,0,360,236);
@@ -79,12 +139,14 @@ public final class PixelShopView extends View {
         for(int y=12;y<115;y+=24)rect(0xff82533e,0,y,360,2);
         for(int x=0;x<360;x+=54)rect(0xff614034,x,0,3,112);
     }
-    private void drawInterior(){
+    private void drawInterior(long now){
         tiles();
         rect(0xff293f41,0,0,360,21);
         text("ICHITSUBO  ·  SUSHI",0xffe4cda0,12,87,15);
         window(15,33);window(291,33);
         noren(138,20);lantern(101,35);lantern(241,35);
+        if((now/680)%2==0)rect(0x66ffe4a2,108,52,14,18);
+        if((now/910)%2==0)rect(0x66ffe4a2,249,52,14,18);
         // wall fish art
         edge(60,36,36,23,0xffe0c7a2);rect(0xff567573,65,42,27,13);
         rect(0xff8ac0b3,68,48,21,5);rect(0xffd2ede6,82,46,4,3);
@@ -103,7 +165,12 @@ public final class PixelShopView extends View {
         for(int i=0;i<9;i++)rect(0xff654235,17+i*38,172,24,16);
         // small tea cups and plates
         for(int i=0;i<4;i++){rect(0xffe4ddbd,48+i*83,155,10,6);rect(0xff3f746e,50+i*83,155,6,6);}
-        person(18,174,95,true,false);rect(0xfff1ddb3,196,127,24,5);
+        int chefBob=(int)((now/300)%2);
+        person(18,174,95+chefBob,true,false);
+        if(cooking||((now/600)%3==0)){
+            rect(0xfff0ca9b,196,122+chefBob,15,5);
+            rect(0xfff1ddb3,202,127+chefBob,18,4);
+        } else rect(0xfff1ddb3,196,127,24,5);
         // foreground stools
         for(int i=0;i<Math.min(6,world.seats());i++){
             int x=37+i*54;
@@ -114,8 +181,25 @@ public final class PixelShopView extends View {
         int j=0;
         for(SushiWorld.Customer c:world.seated){
             if(j>=Math.min(6,world.seats()))break;
-            person(c.index,48+j*54,173,false,true);
+            float p=progress(now-entering.getOrDefault(c.index,now),WALK_MS);
+            int targetX=48+j*54;
+            if(p<1f){
+                int x=(int)(334+(targetX-334)*p);
+                int y=(int)(194+(173-194)*p);
+                person(c.index,x,y,false,false,walkStep(now));
+            }else{
+                int breathe=(int)((now/430+c.index)%2);
+                person(c.index,targetX,173+breathe,false,true);
+                if(c.servedPieces>0){rect(0xfff8e2b0,targetX-5,194,29,4);sushi(targetX-3,185,c.index);}
+                else if((now/600)%2==0){rect(0xfff5eccf,targetX+9,151,3,9);rect(0xfff5eccf,targetX+5,154,11,3);}
+            }
             j++;
+        }
+        for(Departure d:departing){
+            float p=progress(now-d.when,LEAVE_MS);
+            int x=(int)(d.startingX+(335-d.startingX)*p);
+            int y=(int)(173+(194-173)*p);
+            person(d.id,x,y,false,false,walkStep(now));
         }
         rect(0xaa172b30,11,210,338,22);
         text("来店 "+world.seated.size()+"人     行列 "+world.queue.size()+"人     ケース "+world.visibleCaseCount()+"種",0xfff4e8cc,11,19,225);
@@ -157,10 +241,27 @@ public final class PixelShopView extends View {
     }
     @Override public void onDraw(Canvas c){
         super.onDraw(c);
+        long now=SystemClock.uptimeMillis();
         p.setAntiAlias(false); p.setFilterBitmap(false);p.setDither(false);
-        if(mode==1)drawStreet();else drawInterior();
+        if(mode==1)drawStreet();else drawInterior(now);
         Rect src=new Rect(0,0,360,236);
         RectF dst=new RectF(0,0,getWidth(),getHeight());
         c.drawBitmap(bitmap,src,dst,p);
+        if(getWindowVisibility()==VISIBLE)postInvalidateDelayed(65);
+    }
+    @Override public boolean onTouchEvent(MotionEvent e){
+        if(e.getAction()!=MotionEvent.ACTION_UP)return true;
+        if(mode!=0||tapListener==null||world==null)return true;
+        float x=e.getX()*360f/Math.max(1,getWidth());
+        float y=e.getY()*236f/Math.max(1,getHeight());
+        if(y<157||y>213)return true;
+        for(int j=0;j<world.seated.size()&&j<6;j++){
+            int target=48+j*54;
+            if(Math.abs(x-(target+9))<=26){
+                tapListener.onCustomerTap(world.seated.get(j));
+                break;
+            }
+        }
+        return true;
     }
 }
