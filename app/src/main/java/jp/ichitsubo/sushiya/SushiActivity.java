@@ -549,5 +549,5 @@ public final class SushiActivity extends Activity {
             if(dismiss!=null)dismiss.run();callback.outcome(result);return true;
         }
     }
-    @Override public void onPause(){persist();super.onPause();}
+    @Override public void onPause(){stopClock();gameClock.removeCallbacks(clockTick);persist();super.onPause();}
 }
