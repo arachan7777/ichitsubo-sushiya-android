@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="true" android:label="一坪寿司屋（開発中）" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+    <application android:allowBackup="true" android:label="一坪寿司屋（動く試遊版）" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
         <activity android:name=".SushiActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
