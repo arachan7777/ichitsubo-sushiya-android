@@ -1,0 +1,450 @@
+package jp.ichitsubo.sushiya;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.os.Bundle;
+import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.drawable.GradientDrawable;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Touch-playable Android sushi restaurant. The artwork is rendered locally as crisp pixel art.
+ * Dialogue episodes and unfinished original-story assets are not represented as complete.
+ */
+public final class SushiActivity extends Activity {
+    private SushiWorld game;
+    private LinearLayout body,menu;
+    private TextView headline,logView;
+    private PixelShopView scene;
+    private String tab="店内";
+    private static final int BG=0xfff2e8d4, INK=0xff203e40, PRIMARY=0xff355d59, ACCENT=0xffb96542, CARD=0xfffff7e7;
+    @Override public void onCreate(Bundle b){
+        super.onCreate(b);getWindow().setStatusBarColor(INK);getWindow().setNavigationBarColor(INK);
+        game=restore();render(true);
+    }
+    private int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+0.5f);}
+    private GradientDrawable bg(int color,int stroke,int corner){
+        GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(dp(corner));if(stroke!=0)g.setStroke(dp(1),stroke);return g;
+    }
+    private TextView label(String text,int size,int color,boolean bold){
+        TextView v=new TextView(this);v.setText(text);v.setTextColor(color);v.setTextSize(size);
+        v.setPadding(dp(8),dp(7),dp(8),dp(7));
+        if(bold)v.setTypeface(android.graphics.Typeface.DEFAULT,1);
+        return v;
+    }
+    private LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.HORIZONTAL);return l;}
+    private Button button(String title,Runnable action,int color){
+        Button b=new Button(this);b.setText(title);b.setAllCaps(false);b.setTextSize(14);b.setTextColor(Color.WHITE);
+        b.setBackground(bg(color,0,8));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(43));lp.setMargins(dp(3),dp(3),dp(3),dp(3));b.setLayoutParams(lp);
+        b.setOnClickListener(v->action.run());return b;
+    }
+    private void add(String text,Runnable action){menu.addView(button(text,action,PRIMARY));}
+    private void small(String text,Runnable action){menu.addView(button(text,action,ACCENT));}
+    private void caption(String text){menu.addView(label(text,14,INK,false));}
+    private void header(String text){TextView t=label(text,18,INK,true);t.setPadding(dp(9),dp(12),dp(8),dp(6));menu.addView(t);}
+    private void two(String left,Runnable a,String right,Runnable b){
+        LinearLayout l=row();
+        Button lft=button(left,a,PRIMARY),rgt=button(right,b,PRIMARY);
+        l.addView(lft,new LinearLayout.LayoutParams(0,dp(44),1));
+        l.addView(rgt,new LinearLayout.LayoutParams(0,dp(44),1));
+        menu.addView(l);
+    }
+    private void toast(String message){new AlertDialog.Builder(this).setMessage(message).setPositiveButton("閉じる",null).show();}
+    private void persist(){
+        try{
+            JSONObject j=new JSONObject();
+            j.put("run",game.run);j.put("day",game.day);j.put("minute",game.minute);j.put("yen",game.yen);
+            j.put("shopTier",game.shopTier);j.put("fridgeTier",game.fridgeTier);j.put("caseTier",game.caseTier);
+            j.put("seasonPayroll",game.seasonPayroll);j.put("visitCount",game.visitCount);j.put("carrying",game.carrying);
+            j.put("currentStore",game.currentStore);j.put("restaurantStart",game.restaurantStart);j.put("restaurantEnd",game.restaurantEnd);
+            j.put("totalSales",game.totalSales);j.put("completedOrders",game.completedOrders);
+            j.put("eventVisitDay",game.eventVisitDay);j.put("contestEntry",game.contestEntry);
+            j.put("contestRound",game.contestRound);j.put("contestScore",game.contestScore);
+            j.put("fishermanPaidSeason",game.fishermanPaidSeason);j.put("wonContests",game.wonContests);
+            j.put("closedForDay",game.closedForDay);j.put("ended",game.ended);j.put("hasTruck",game.hasTruck);
+            j.put("log",game.log);
+            j.put("relation",ints(game.relation));j.put("stock",ints(game.stock));
+            j.put("introduced",bools(game.introduced));j.put("caseActive",bools(game.caseActive));
+            j.put("staffEmployed",bools(game.staffEmployed));j.put("receivedDecor",bools(game.receivedDecor));
+            j.put("equippedDecor",bools(game.equippedDecor));j.put("decorCarried",ints(game.decorCarried));
+            JSONArray seated=new JSONArray(),queue=new JSONArray();
+            for(SushiWorld.Customer c:game.seated)seated.put(customerJson(c));
+            for(SushiWorld.Customer c:game.queue)queue.put(customerJson(c));
+            j.put("seated",seated);j.put("queue",queue);
+            getPreferences(MODE_PRIVATE).edit().putString("sushi_state",j.toString()).apply();
+        }catch(Exception e){android.util.Log.e("SushiSave","save",e);}
+    }
+    private JSONObject customerJson(SushiWorld.Customer c)throws Exception{
+        JSONObject j=new JSONObject();j.put("index",c.index);j.put("wait",c.wait);j.put("stay",c.stay);
+        j.put("charge",c.charge);j.put("servedPieces",c.servedPieces);j.put("extra",c.extra);return j;
+    }
+    private static JSONArray ints(int[] a){JSONArray j=new JSONArray();for(int v:a)j.put(v);return j;}
+    private static JSONArray bools(boolean[] a){JSONArray j=new JSONArray();for(boolean v:a)j.put(v);return j;}
+    private static void readInts(JSONObject o,String name,int[] a)throws Exception{
+        JSONArray v=o.getJSONArray(name);if(v.length()!=a.length)throw new Exception("セーブ配列長が異なる "+name);
+        for(int i=0;i<a.length;i++)a[i]=v.getInt(i);
+    }
+    private static void readBools(JSONObject o,String name,boolean[] a)throws Exception{
+        JSONArray v=o.getJSONArray(name);if(v.length()!=a.length)throw new Exception("セーブ配列長が異なる "+name);
+        for(int i=0;i<a.length;i++)a[i]=v.getBoolean(i);
+    }
+    private SushiWorld.Customer customer(JSONObject j)throws Exception{
+        SushiWorld.Customer c=new SushiWorld.Customer(j.getInt("index"));
+        c.wait=j.getInt("wait");c.stay=j.getInt("stay");c.charge=j.getInt("charge");
+        c.servedPieces=j.getInt("servedPieces");c.extra=j.getBoolean("extra");return c;
+    }
+    private SushiWorld restore(){
+        String raw=getPreferences(MODE_PRIVATE).getString("sushi_state","");
+        SushiWorld s=new SushiWorld();if(raw.isEmpty())return s;
+        try{
+            JSONObject j=new JSONObject(raw);
+            s.run=j.getInt("run");s.day=j.getInt("day");s.minute=j.getInt("minute");s.yen=j.getInt("yen");
+            s.shopTier=j.getInt("shopTier");s.fridgeTier=j.getInt("fridgeTier");s.caseTier=j.getInt("caseTier");
+            s.seasonPayroll=j.getInt("seasonPayroll");s.visitCount=j.getInt("visitCount");s.carrying=j.getInt("carrying");
+            s.currentStore=j.getInt("currentStore");s.restaurantStart=j.getInt("restaurantStart");s.restaurantEnd=j.getInt("restaurantEnd");
+            s.totalSales=j.getInt("totalSales");s.completedOrders=j.getInt("completedOrders");
+            s.eventVisitDay=j.getInt("eventVisitDay");s.contestEntry=j.getInt("contestEntry");
+            s.contestRound=j.getInt("contestRound");s.contestScore=j.getInt("contestScore");
+            s.fishermanPaidSeason=j.getInt("fishermanPaidSeason");s.wonContests=j.getInt("wonContests");
+            s.closedForDay=j.getBoolean("closedForDay");s.ended=j.getBoolean("ended");s.hasTruck=j.getBoolean("hasTruck");
+            s.log=j.optString("log","");
+            readInts(j,"relation",s.relation);readInts(j,"stock",s.stock);
+            readBools(j,"introduced",s.introduced);readBools(j,"caseActive",s.caseActive);
+            readBools(j,"staffEmployed",s.staffEmployed);readBools(j,"receivedDecor",s.receivedDecor);
+            readBools(j,"equippedDecor",s.equippedDecor);readInts(j,"decorCarried",s.decorCarried);
+            for(int i=0;i<j.getJSONArray("seated").length();i++)s.seated.add(customer(j.getJSONArray("seated").getJSONObject(i)));
+            for(int i=0;i<j.getJSONArray("queue").length();i++)s.queue.add(customer(j.getJSONArray("queue").getJSONObject(i)));
+            s.refreshMarkets();
+        }catch(Exception e){android.util.Log.e("SushiSave","load",e);}
+        return s;
+    }
+    private void changed(){persist();render(false);}
+    private void render(boolean reset){
+        if(reset){
+            ScrollView scroll=new ScrollView(this);
+            scroll.setFillViewport(true);scroll.setBackgroundColor(BG);
+            body=new LinearLayout(this);body.setPadding(dp(10),dp(6),dp(10),dp(18));body.setOrientation(LinearLayout.VERTICAL);
+            scroll.addView(body);setContentView(scroll);
+            TextView title=label("🍣 一坪寿司屋",26,INK,true);title.setGravity(Gravity.CENTER);
+            body.addView(title);
+            scene=new PixelShopView(this,game);
+            body.addView(scene,new LinearLayout.LayoutParams(-1,dp(235)));
+            headline=label("",14,INK,true);headline.setBackground(bg(CARD,0,5));body.addView(headline);
+            logView=label("",13,0xff825436,false);body.addView(logView);
+            LinearLayout nav=row();
+            for(String name:new String[]{"店内","魚屋","常連","経営"}){
+                final String target=name;Button b=button(name,()->{tab=target;changed();},ACCENT);
+                nav.addView(b,new LinearLayout.LayoutParams(0,dp(44),1));
+            }
+            body.addView(nav);
+            menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);body.addView(menu);
+        }
+        scene.update(game,tab.equals("魚屋")?1:0);
+        headline.setText("第"+game.run+"周   "+game.date()+"   "+game.time()
+            +"\n所持金 "+String.format(Locale.JAPAN,"%,d",game.yen)+"円"
+            +"   関係スコア "+String.format(Locale.JAPAN,"%,d",game.score())+"点");
+        logView.setText("✦ "+game.log);
+        menu.removeAllViews();
+        if(game.ended){showEnd();return;}
+        if(tab.equals("店内"))showRestaurant();
+        else if(tab.equals("魚屋"))showMarkets();
+        else if(tab.equals("常連"))showPeople();
+        else showManagement();
+    }
+    private void showRestaurant(){
+        header("寿司屋の営業");
+        caption("席 "+game.seated.size()+"/"+game.seats()+"  行列 "+game.queue.size()+"/"+game.queueCapacity()
+               +"  注文累計 "+game.completedOrders+"件");
+        if(game.currentStore>=0){
+            caption("買い出し中。魚屋画面から仕入れを終えて戻れる。");
+            add("魚屋へ戻る",()->{tab="魚屋";changed();});return;
+        }
+        if(game.minute<game.restaurantStart&&!game.closedForDay){
+            add("営業開始（"+String.format(Locale.JAPAN,"%02d:%02d",game.restaurantStart/60,game.restaurantStart%60)+"）",()->{
+                game.minute=game.restaurantStart;game.log="暖簾を掲げ、営業を始めた。";changed();
+            });
+        }
+        if(game.minute>=game.restaurantStart&&game.minute<game.restaurantEnd&&!game.closedForDay){
+            add("ゲーム内15分進める・来客を迎える",()->{game.advanceQuarter();changed();});
+            caption("来店したお客を選ぶと注文を受け、タイミング操作で寿司を握れる。");
+            if(game.seated.isEmpty())caption("客席はまだ空いている。");
+            for(SushiWorld.Customer c:new ArrayList<>(game.seated)){
+                String text=c.name()+"  Lv"+game.level(c.index)+"  "+game.tier(c.index)
+                    +"  "+(c.servedPieces==0?"未注文":c.servedPieces+"貫提供済み");
+                add(text,()->customerDialog(c));
+            }
+            if(!game.queue.isEmpty()){
+                header("店の外で待つお客");
+                for(SushiWorld.Customer c:game.queue)
+                    caption("・"+c.name()+"  待機残り "+c.wait+"分");
+            }
+        }
+        if(game.minute>=game.restaurantEnd||game.closedForDay){
+            add("次の日へ（仕入れは午前8～10時）",()->{
+                if(!game.closedForDay)game.closePayroll();
+                else game.closePayroll();
+                game.nextDay();changed();
+            });
+        }
+        if(game.minute<game.restaurantStart){
+            caption("午前8～10時に魚屋で仕入れが可能。玉子は常に無料で握れる。");
+            two("魚屋へ",()->{tab="魚屋";changed();},"ネタケース",this::caseDialog);
+        }else small("ネタケースを管理する",this::caseDialog);
+        if(game.contestEntry>=0){
+            header("参加中の寿司大会");
+            add("課題"+(game.contestRound+1)+"/4・ランク"+game.contestRank()+"を握る",this::contestTiming);
+        }
+    }
+    private void showMarkets(){
+        header("横丁の魚屋へ買い出し");
+        caption("午前8:00～10:00だけ。自転車1店舗・200貫／軽トラック2店舗・400貫。"
+            +"\n今日の訪問 "+game.visitCount+"/"+(game.hasTruck?2:1)
+            +"、自分で運ぶ量 "+game.carrying+"/"+(game.hasTruck?400:200)+"貫相当");
+        if(game.currentStore<0){
+            for(int i=0;i<4;i++){
+                final int k=i;
+                String caption=game.hasStore(i)?"":"（紹介されると解放）";
+                add(SushiWorld.STORE_NAMES[i]+caption,()->{
+                    if(!game.visit(k))toast("この魚屋にはまだ行けない。紹介条件・時間帯・訪問回数を確認。");
+                    else changed();
+                });
+            }
+            if(game.minute<600&&game.visitCount>0)small("買い出しを終えて店へ戻る（10:00）",()->{game.minute=600;tab="店内";changed();});
+            if(game.minute>=600)caption("今日の買い出し時間は終了した。");
+            return;
+        }
+        int store=game.currentStore;
+        header(SushiWorld.STORE_NAMES[store]);
+        small("この魚屋から寿司屋に戻る",()->{game.returnStore();changed();});
+        caption("各ネタ200貫分が店頭在庫。1回の購入は10貫相当。旬は仕入れ値20％引き。"
+               +"\n配送解放："+(game.deliveryUnlocked(store)?"あり（本人Lv5）":"なし（本人Lv5で解放）"));
+        for(int i=0;i<85;i++){
+            if(game.market(store,i)<10)continue;
+            final int fi=i;Catalog.Fish f=Catalog.FISH[i];
+            String text=f.name+"  ランク"+f.rank+"  "+game.buyPrice(f)+"円/10貫  在庫"+game.market(store,i)+"貫";
+            two(text,()->buy(fi,false),
+                game.deliveryUnlocked(store)?"配達購入":"＋10貫",()->buy(fi,game.deliveryUnlocked(store)));
+        }
+    }
+    private void buy(int i,boolean delivery){
+        if(!game.buy(i,1,delivery)){toast("購入できない。所持金、冷蔵庫容量、車の積載量、店頭在庫を確認。");return;}
+        changed();
+    }
+    private void caseDialog(){
+        LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);
+        TextView status=label("ネタケース "+game.visibleCaseCount()+"/"+game.caseCapacity()
+            +"種類　冷蔵庫 "+game.totalStock()+"/"+game.fridgeCapacity()+"貫",14,INK,true);
+        list.addView(status);
+        for(int i=0;i<85;i++){
+            if(game.stock[i]<=0&&Catalog.FISH[i].number!=60)continue;
+            final int id=i;Catalog.Fish f=Catalog.FISH[i];
+            Button b=button((game.caseActive[i]?"● ":"○ ")+f.name+" 在庫"+(f.number==60?"無限":game.stock[i])+"貫",()->{
+                if(!game.toggleCase(id))toast("ネタケースの陳列枠が不足している、または玉子は常設。");
+                else changed();
+                caseDialog();
+            },PRIMARY);list.addView(b);
+        }
+        ScrollView scroll=new ScrollView(this);scroll.addView(list);
+        new AlertDialog.Builder(this).setTitle("ネタケース").setView(scroll).setPositiveButton("閉じる",null).show();
+    }
+    private void customerDialog(SushiWorld.Customer c){
+        Catalog.Guest guest=game.guest(c.index);
+        Catalog.Fish fav=Catalog.fish(guest.favorite);
+        String info=c.name()+"\n常連度 Lv"+game.level(c.index)+"（"+game.relation[c.index]+"点）"
+            +"\n好物："+(fav==null?"不明":fav.name)
+            +"\n既に提供した寿司："+c.servedPieces+"貫";
+        if(c.servedPieces>0){
+            new AlertDialog.Builder(this).setTitle(c.name()).setMessage(info).setPositiveButton("戻る",null).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("ご注文を承ります")
+            .setMessage(info).setPositiveButton("注文を受ける", (dialog,which)->orderDialog(c,false))
+            .setNegativeButton("まだ接客しない",null).show();
+    }
+    private void orderDialog(SushiWorld.Customer customer,boolean extra){
+        SushiWorld.Order order=game.orderFor(customer.index,extra);
+        String txt=(extra?"おまかせ追加4貫":"最初のご注文 最大8貫")
+            +"\n"+order.summary()
+            +"\nランク平均 "+order.difficultyRank
+            +"\n\n針が中央の色つき範囲に来たらタッチ。大成功なら関係値＋12。";
+        new AlertDialog.Builder(this).setTitle(customer.name()+"の注文")
+            .setMessage(txt)
+            .setPositiveButton("寿司を握る", (dialog,which)->timing(customer,order))
+            .setNegativeButton("注文を確認する",null).show();
+    }
+    private void timing(SushiWorld.Customer customer,SushiWorld.Order order){
+        TimingView view=new TimingView(this,order.difficultyRank,result->{
+            int gained=game.serve(customer,order,result);
+            String report=customer.name()+"に"+order.pieces+"貫を提供。\n"
+                +(result==2?"大成功！":result==1?"成功！":"失敗…")
+                +"\n関係値 "+(gained>=0?"+":"")+gained;
+            if(result==2&&!order.omakase&&order.pieces==8){
+                if(game.working(2))game.award(customer.index,2);
+                changed();
+                new AlertDialog.Builder(this).setTitle("おまかせ追加注文！")
+                    .setMessage(report+"\n\n大成功したため、直後に4貫の追加注文。")
+                    .setPositiveButton("追加4貫を握る",(d,w)->orderDialog(customer,true)).show();
+            } else {changed();toast(report);}
+        });
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle(order.omakase?"おまかせ4貫を握る":"寿司8貫を握る")
+            .setView(view)
+            .setNegativeButton("中断",null).create();
+        view.setOnResultDismiss(()->dialog.dismiss());
+        dialog.show();
+    }
+    private void showPeople(){
+        header("常連さんの記録");
+        caption("通常客33人・行事特別客8人。会話や注文を通じて関係Lvが上がり、紹介によってお客が増える。"
+               +"\n人物ごとの長編エピソードと手描き回想は制作途中。");
+        for(int i=0;i<33;i++){
+            final int id=i;Catalog.Guest c=Catalog.REGULAR[i];
+            if(!game.introduced[i])continue;
+            Catalog.Fish fav=Catalog.fish(c.favorite);
+            add(c.name+"  Lv"+game.level(i)+"  "+game.tier(i),()->{
+                toast(c.name()+"\n関係値："+game.relation[id]+" / 900でLv10"
+                    +"\n好物："+(fav==null?"":fav.name)
+                    +"\n好みの曜日："+weekdays(c.weekdayMask)+"\n個別の物語は制作途中。");
+            });
+        }
+        header("行事限定の8人");
+        for(int i=0;i<8;i++){
+            int idx=i+33;
+            Catalog.Guest c=Catalog.SPECIAL[i];
+            caption(c.festival+" ・ "+c.name+"   Lv"+game.level(idx)+"（周回で引き継ぎ）");
+        }
+    }
+    private String weekdays(int mask){
+        StringBuilder b=new StringBuilder();for(int i=0;i<7;i++)if((mask&(1<<i))!=0)b.append(SushiWorld.WEEKDAYS[i]);
+        return b.length()==0?"行事開催日":b.toString();
+    }
+    private void showManagement(){
+        header("経営と店づくり");
+        caption("店舗 "+new String[]{"1坪（4席）","3坪（8席）","5坪（12席）"}[game.shopTier]
+            +"　所持金 "+game.yen+"円"
+            +"\n季節固定維持費 "+game.fixedUpkeep()+"円、給与累積 "+game.seasonPayroll+"円");
+        if(game.canExpand())small("店舗を拡張する（"+(game.shopTier==0?300000:700000)+"円）",()->{game.expand();changed();});
+        else caption("店舗拡張：課長代理Lv7→3坪、タバちゃんLv8→5坪。改装費30万／70万円。");
+        header("アルバイト");
+        caption("3坪で1人、5坪で2人まで。営業開始前に採用・解雇可能。");
+        for(int i=0;i<4;i++){
+            final int id=i;int who=Catalog.guestIndex(SushiWorld.STAFF_NAMES[i]);
+            String state=game.staffEmployed[i]?"勤務中":game.level(who)<SushiWorld.PROMOTION_STAFF_LV[i]?"未解放":"待機";
+            add(SushiWorld.STAFF_NAMES[i]+"  "+state+"  "+SushiWorld.HOURLY[i]+"円/時",()->{
+                if(!game.toggleStaff(id))toast("採用・解雇できない。関係Lv、店舗規模、営業時間を確認。");
+                else changed();
+            });
+        }
+        header("季節の大会");
+        if(game.wonContests<4)
+            caption("次の大会："+SushiWorld.CONTEST_NAMES[game.wonContests]+"。"
+                +"\n季節末（日曜）12時開始。事前エントリー費 "+SushiWorld.CONTEST_FEES[game.wonContests]+"円。");
+        else caption("全4大会優勝済み。");
+        if(game.wonContests<4) add("この季節の大会へエントリー",()->{
+            if(!game.joinContest())toast("エントリーは季節最終日12時より前、残高が足りる場合のみ。");
+            else changed();
+        });
+        if(game.contestEntry>=0)add("エントリー済み：大会の調理へ",()->{tab="店内";contestTiming();});
+        header("魚の直送契約");
+        add("潮さんの故郷の兄と今季35,000円で契約",()->{
+            if(!game.contractFisherman())toast("潮さんとの関係や契約済みかどうか、所持金を確認。");
+            else changed();
+        });
+        header("装飾品");
+        caption("設置枠：1坪8、3坪10、5坪13。贈り物の受取イベント・配置の個別効果は制作中。");
+        for(int i=0;i<13;i++)if(game.receivedDecor[i]){final int id=i;add("装飾品 "+(i+1)+(game.equippedDecor[i]?" 設置中":" 所持"),()->{
+            game.equippedDecor[id]=!game.equippedDecor[id];changed();
+        });}
+        header("4年のスコアと周回");
+        caption("現在 "+String.format(Locale.JAPAN,"%,d",game.score())+"点 / 理論最高73,000点"
+           +"\n通常客Lv合計＋イベント客Lv合計×5、すべて100倍して表示。"
+           +"\nイベント客の常連度と、選んだ装飾品だけ次周へ引き継ぐ。");
+        caption("端末内に自動セーブ済み。広告・課金はゲーム本体の完成後に接続する。");
+    }
+    private void showEnd(){
+        header("4年間の経営結果");
+        caption("第"+game.run+"周　最終得点 "+
+            String.format(Locale.JAPAN,"%,d",game.score())+"点。");
+        add("強くてニューゲーム（引継ぎあり）",()->{
+            // Only items already received may be chosen; incomplete decoration selection UI marked as such.
+            List<Integer> own=new ArrayList<>();for(int i=0;i<13;i++)if(game.receivedDecor[i])own.add(i);
+            int limit=Math.min(10,game.run);
+            int[] ids=new int[Math.min(limit,own.size())];
+            for(int i=0;i<ids.length;i++)ids[i]=own.get(i);
+            game.beginNextRun(ids);changed();
+        });
+        caption("このまま無期限に営業を続ける仕様は未実装。現在は周回のみ確認できる。");
+    }
+    private void contestTiming(){
+        if(game.contestEntry<0)return;
+        int rank=game.contestRank();
+        TimingView view=new TimingView(this,rank,result->{
+            game.contestJudge(result);
+            changed();
+            toast("大会の調理結果："+(result==2?"大成功":result==1?"成功":"失敗")
+                +"。\n"+game.log+"\n大会課題が残っていれば店内画面から続けられる。");
+        });
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("大会の課題 "+(game.contestRound+1)+"/4  ランク"+rank)
+            .setView(view).setNegativeButton("中断",null).create();
+        view.setOnResultDismiss(()->dialog.dismiss());dialog.show();
+    }
+    /** Real-time touch timing minigame: moving pointer and distinct great/good windows. */
+    private static final class TimingView extends View {
+        interface Callback{void outcome(int result);}
+        private final Paint paint=new Paint(3);
+        private final Callback callback;
+        private final int rank;
+        private float phase=0;
+        private long previous=0;
+        private boolean finished=false;
+        private Runnable dismiss;
+        TimingView(Context c,int rank,Callback cb){super(c);this.rank=rank;this.callback=cb;setMinimumHeight((int)(170*c.getResources().getDisplayMetrics().density));}
+        void setOnResultDismiss(Runnable r){dismiss=r;}
+        @Override protected void onDraw(Canvas canvas){
+            int w=getWidth(),h=getHeight();paint.setColor(0xfff7e9d0);canvas.drawColor(0xfff7e9d0);
+            long now=android.os.SystemClock.uptimeMillis();
+            if(previous==0)previous=now;
+            if(!finished)phase+=(now-previous)*(.00045f+rank*.00021f);
+            previous=now;
+            float needle=(float)((Math.sin(phase*Math.PI*2)+1)*.5);
+            int left=(int)(w*.08f),width=(int)(w*.84f),center=left+width/2;
+            float good=Math.max(.075f,.28f-rank*.028f),great=Math.max(.02f,.088f-rank*.009f);
+            paint.setColor(0xff2b4e4d);canvas.drawRoundRect(left,h*.45f,left+width,h*.65f,10,10,paint);
+            paint.setColor(0xffe0b86f);canvas.drawRect(center-width*good,h*.45f,center+width*good,h*.65f,paint);
+            paint.setColor(0xff75bb93);canvas.drawRect(center-width*great,h*.45f,center+width*great,h*.65f,paint);
+            paint.setColor(0xffd65e49);float x=left+needle*width;
+            canvas.drawRect(x-4,h*.32f,x+4,h*.78f,paint);
+            paint.setColor(0xff253f41);paint.setTextSize(h*.105f);paint.setTextAlign(Paint.Align.CENTER);
+            canvas.drawText("中央の緑色で大成功！",w/2,h*.2f,paint);
+            canvas.drawText("ここをタッチして判定",w/2,h*.92f,paint);
+            if(!finished)postInvalidateDelayed(16);
+        }
+        @Override public boolean onTouchEvent(MotionEvent e){
+            if(e.getAction()!=MotionEvent.ACTION_DOWN||finished)return true;
+            finished=true;
+            float pos=(float)((Math.sin(phase*Math.PI*2)+1)*.5);
+            float dist=Math.abs(pos-.5f);
+            float good=Math.max(.075f,.28f-rank*.028f),great=Math.max(.02f,.088f-rank*.009f);
+            int result=dist<=great?2:dist<=good?1:0;
+            if(dismiss!=null)dismiss.run();callback.outcome(result);return true;
+        }
+    }
+    @Override public void onPause(){persist();super.onPause();}
+}
