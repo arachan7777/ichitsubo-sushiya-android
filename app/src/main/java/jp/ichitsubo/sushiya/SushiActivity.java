@@ -144,6 +144,7 @@ public final class SushiActivity extends Activity {
             TextView title=label("🍣 一坪寿司屋",26,INK,true);title.setGravity(Gravity.CENTER);
             body.addView(title);
             scene=new PixelShopView(this,game);
+            scene.setCustomerTapListener(this::customerDialog);
             body.addView(scene,new LinearLayout.LayoutParams(-1,dp(235)));
             headline=label("",14,INK,true);headline.setBackground(bg(CARD,0,5));body.addView(headline);
             logView=label("",13,0xff825436,false);body.addView(logView);
@@ -182,7 +183,8 @@ public final class SushiActivity extends Activity {
         }
         if(game.minute>=game.restaurantStart&&game.minute<game.restaurantEnd&&!game.closedForDay){
             add("ゲーム内15分進める・来客を迎える",()->{game.advanceQuarter();changed();});
-            caption("来店したお客を選ぶと注文を受け、タイミング操作で寿司を握れる。");
+            caption("画面のドット絵のお客をタップ、または下の名前を選ぶと注文を受けられる。"
+                +"\n針を中央の緑色で止めると寿司が大成功する。");
             if(game.seated.isEmpty())caption("客席はまだ空いている。");
             for(SushiWorld.Customer c:new ArrayList<>(game.seated)){
                 String text=c.name()+"  Lv"+game.level(c.index)+"  "+game.tier(c.index)
@@ -237,16 +239,36 @@ public final class SushiActivity extends Activity {
         for(int i=0;i<85;i++){
             if(game.market(store,i)<10)continue;
             final int fi=i;Catalog.Fish f=Catalog.FISH[i];
-            String text=f.name+"  ランク"+f.rank+"  "+game.buyPrice(f)+"円/10貫  在庫"+game.market(store,i)+"貫";
-            two(text,()->buy(fi,false),
-                game.deliveryUnlocked(store)?"配達購入":"＋10貫",()->buy(fi,game.deliveryUnlocked(store)));
+            String text=f.name+"（ランク"+f.rank+"）  "+game.buyPrice(f)+"円/10貫"
+                +"  在庫"+game.market(store,i)+"貫";
+            add(text,()->choosePurchase(fi));
         }
     }
-    private void buy(int i,boolean delivery){
-        if(!game.buy(i,1,delivery)){toast("購入できない。所持金、冷蔵庫容量、車の積載量、店頭在庫を確認。");return;}
-        changed();
+    private void choosePurchase(int index){
+        Catalog.Fish f=Catalog.FISH[index];
+        int[] qty={10,20,50,100,200};
+        boolean delivery=game.deliveryUnlocked(game.currentStore);
+        int count=delivery?qty.length*2:qty.length;
+        String[] options=new String[count];
+        for(int i=0;i<count;i++){
+            int units=qty[i%qty.length]/10;
+            boolean shipping=delivery&&i>=qty.length;
+            options[i]=qty[i%qty.length]+"貫分  "+String.format(Locale.JAPAN,"%,d",game.buyPrice(f)*units)
+                +"円"+(shipping?"（配達）":"（持ち帰り）");
+        }
+        new AlertDialog.Builder(this).setTitle(f.name+"の仕入れ")
+            .setMessage("数量と運び方を選択。持ち帰りは積載量、配達は本人との関係条件が必要。")
+            .setItems(options,(d,i)->{
+                int units=qty[i%qty.length]/10;
+                boolean shipping=delivery&&i>=qty.length;
+                if(!game.buy(index,units,shipping))
+                    toast("購入できない。所持金、冷蔵庫容量、積載量、店頭在庫を確認。");
+                else changed();
+            })
+            .setNegativeButton("戻る",null).show();
     }
     private void caseDialog(){
+        final AlertDialog[] activeDialog={null};
         LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);
         TextView status=label("ネタケース "+game.visibleCaseCount()+"/"+game.caseCapacity()
             +"種類　冷蔵庫 "+game.totalStock()+"/"+game.fridgeCapacity()+"貫",14,INK,true);
@@ -255,13 +277,15 @@ public final class SushiActivity extends Activity {
             if(game.stock[i]<=0&&Catalog.FISH[i].number!=60)continue;
             final int id=i;Catalog.Fish f=Catalog.FISH[i];
             Button b=button((game.caseActive[i]?"● ":"○ ")+f.name+" 在庫"+(f.number==60?"無限":game.stock[i])+"貫",()->{
-                if(!game.toggleCase(id))toast("ネタケースの陳列枠が不足している、または玉子は常設。");
+                boolean toggled=game.toggleCase(id);
+                if(activeDialog[0]!=null)activeDialog[0].dismiss();
+                if(!toggled)toast("ネタケースの陳列枠が不足している、または玉子は常設。");
                 else changed();
-                caseDialog();
+                if(toggled)caseDialog();
             },PRIMARY);list.addView(b);
         }
         ScrollView scroll=new ScrollView(this);scroll.addView(list);
-        new AlertDialog.Builder(this).setTitle("ネタケース").setView(scroll).setPositiveButton("閉じる",null).show();
+        activeDialog[0]=new AlertDialog.Builder(this).setTitle("ネタケース").setView(scroll).setPositiveButton("閉じる",null).show();
     }
     private void customerDialog(SushiWorld.Customer c){
         Catalog.Guest guest=game.guest(c.index);
@@ -289,6 +313,7 @@ public final class SushiActivity extends Activity {
             .setNegativeButton("注文を確認する",null).show();
     }
     private void timing(SushiWorld.Customer customer,SushiWorld.Order order){
+        scene.setCooking(true);
         TimingView view=new TimingView(this,order.difficultyRank,result->{
             int gained=game.serve(customer,order,result);
             String report=customer.name()+"に"+order.pieces+"貫を提供。\n"
@@ -307,6 +332,7 @@ public final class SushiActivity extends Activity {
             .setView(view)
             .setNegativeButton("中断",null).create();
         view.setOnResultDismiss(()->dialog.dismiss());
+        dialog.setOnDismissListener(d->scene.setCooking(false));
         dialog.show();
     }
     private void showPeople(){
