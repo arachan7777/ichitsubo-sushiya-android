@@ -35,7 +35,7 @@ public final class SushiWorld {
     public int visitCount=0,carrying=0, currentStore=-1, seasonPayroll=0,restaurantStart=1080,restaurantEnd=1320;
     public int totalSales=0, completedOrders=0, eventVisitDay=0, contestEntry=-1,contestRound=0,contestScore=0;
     public int fishermanPaidSeason=-1, fishermanUnlocked=0, wonContests=0;
-    public boolean closedForDay=false, ended=false, festivalQueued=false, hasTruck=false;
+    public boolean closedForDay=false, ended=false, endless=false, festivalQueued=false, hasTruck=false;
     public int[] relation=new int[41],stock=new int[85],marketStock=new int[4*85];
     public boolean[] introduced=new boolean[33],caseActive=new boolean[85],staffEmployed=new boolean[4];
     public boolean[] receivedDecor=new boolean[13], equippedDecor=new boolean[13];
@@ -45,7 +45,8 @@ public final class SushiWorld {
     public long seed=4;
     public static final class Customer {
         public int index,wait,stay,charge,servedPieces; // index 0..32 normal, 33..40 event
-        public boolean extra;
+        public boolean extra,extended,canAdditionalOrder,bonusOmakase;
+        public int leaveAt=30;
         public Customer(int i){index=i;}
         public Customer(){}
         public String name(){return index<33?Catalog.REGULAR[index].name:Catalog.SPECIAL[index-33].name;}
@@ -210,7 +211,10 @@ public final class SushiWorld {
     }
     public boolean canServe(Customer c){return c!=null&&c.servedPieces==0;}
     public int serve(Customer c,Order o,int result){
-        if(c==null||o==null||result<0||result>2)return 0;
+        if(c==null||o==null||result<0||result>2||!seated.contains(c))return 0;
+        if(o.omakase){
+            if(c.servedPieces!=8||!c.bonusOmakase&&!c.canAdditionalOrder)return 0;
+        }else if(c.servedPieces!=0)return 0;
         if(c.servedPieces+(o.omakase?4:8)>12)return 0;
         int pieces=0,cost=0; boolean fav=false;
         for(int i=0;i<4;i++){
@@ -222,6 +226,8 @@ public final class SushiWorld {
             if(Catalog.FISH[fi].number==guest(c.index).favorite)fav=true;
         }
         c.servedPieces+=pieces;
+        if(o.omakase){c.bonusOmakase=false;c.canAdditionalOrder=false;}
+        else if(result==2&&pieces==8)c.bonusOmakase=true;
         // Success 2=great,1=good,0=bad.
         int points=result==2?12:result==1?8:-4;
         if(fav&&result>0&&!o.omakase)points+=2;
@@ -229,6 +235,7 @@ public final class SushiWorld {
         c.charge+=cost;
         completedOrders++;
         log=c.name()+"に"+o.summary()+"を提供。"+(result==2?"大成功！":result==1?"成功。":"失敗…");
+        if(o.omakase&&c.extended&&c.leaveAt==45&&c.stay>=45)checkout(c);
         return points;
     }
     private boolean present(int id){for(Customer c:seated)if(c.index==id)return true;for(Customer c:queue)if(c.index==id)return true;return false;}
@@ -281,25 +288,37 @@ public final class SushiWorld {
             }
         }
     }
+    private void checkout(Customer c){
+        if(!seated.remove(c))return;
+        yen+=c.charge;totalSales+=c.charge;
+        log=c.name()+"がお会計 "+c.charge+"円。";
+    }
     private void fifteenMinutes(){
         Random r=random(minute*9);
         for(Customer c:new ArrayList<>(seated)){
             c.stay+=15;
             if(c.stay==30){
                 double base=new double[]{.12,.15,.195,.24,.30}[tierIndex(level(c.index))];
-                if(r.nextDouble()>=base)c.stay=60; // Mark for departure below, after 30min session.
-                else {c.extra=r.nextBoolean();} // provisional post-45 departure routing
+                c.extended=r.nextDouble()<base;
+                if(c.extended){
+                    c.leaveAt=r.nextBoolean()?45:60;
+                    log=c.name()+"がもう少し店にいることにした。";
+                }else c.leaveAt=30;
             }
-            if(c.stay>=60||c.stay==45&&c.extra){
-                yen+=c.charge;totalSales+=c.charge;seated.remove(c);
-                if(c.charge>0)log=c.name()+"がお会計 "+c.charge+"円。";
+            if(c.stay==45&&c.extended&&c.servedPieces==8&&!c.bonusOmakase)
+                c.canAdditionalOrder=true;
+            if(c.stay>=c.leaveAt&&!(c.stay==45&&c.canAdditionalOrder)){
+                checkout(c);
             }
         }
         for(Customer q:new ArrayList<>(queue)){
             q.wait-=15;
             if(q.wait<=0){queue.remove(q);log=q.name()+"は待ちきれず帰った。";}
         }
-        while(seated.size()<seats()&&!queue.isEmpty()){Customer c=queue.remove(0);c.stay=0;seated.add(c);if(working(0))award(c.index,1);}
+        while(seated.size()<seats()&&!queue.isEmpty()){
+            Customer c=queue.remove(0);c.stay=0;seated.add(c);
+            if(working(0))award(c.index,1);
+        }
         if(minute<restaurantStart||minute>=restaurantEnd)return;
         maybeFestival(r);
         for(int i=0;i<ARRIVAL_DRAWS[shopTier];i++)if(r.nextInt(100)<arrivalChance()){
@@ -313,13 +332,13 @@ public final class SushiWorld {
         else minute+=15;
         if(minute<restaurantEnd)fifteenMinutes();
         else {
-            for(Customer c:seated){yen+=c.charge;totalSales+=c.charge;}
-            seated.clear();queue.clear();closedForDay=true;log="本日の営業を終了した。";
+            for(Customer c:new ArrayList<>(seated))checkout(c);
+            queue.clear();closedForDay=true;log="本日の営業を終了した。";
         }
     }
     public void nextDay(){
         if(currentStore>=0)return;
-        if(day>=RUN_DAYS){ended=true;log="4年の集計 "+String.format(java.util.Locale.JAPAN,"%,d",score())+"点";return;}
+        if(day>=RUN_DAYS&&!endless){ended=true;log="4年の集計 "+String.format(java.util.Locale.JAPAN,"%,d",score())+"点";return;}
         if(day%7==0){Arrays.fill(stock,0);int fee=fixedUpkeep()+seasonPayroll;yen-=fee;seasonPayroll=0;log="季節の維持費・給与 "+fee+"円を精算。";}
         day++;minute=480;visitCount=0;carrying=0;currentStore=-1;closedForDay=false;eventVisitDay=0;
         seated.clear();queue.clear();contestEntry=-1;contestRound=0;contestScore=0;
@@ -392,6 +411,12 @@ public final class SushiWorld {
             contestEntry=-1;
         }
     }
+    public void continueEndless(){
+        if(!ended)return;
+        ended=false;endless=true;
+        nextDay();
+        log="5年目以降も、同じ寿司屋で営業を続けられる。";
+    }
     public void beginNextRun(int[] chosenDecor) {
         if(!ended)throw new IllegalStateException("4年経過前は周回できません");
         if(chosenDecor.length>Math.min(10,run))throw new IllegalArgumentException("装飾品持込数超過");
@@ -401,7 +426,7 @@ public final class SushiWorld {
         run=oldRun+1;day=1;minute=480;yen=100000;shopTier=0;fridgeTier=0;caseTier=0;
         seasonPayroll=0;restaurantStart=1080;restaurantEnd=1320;visitCount=0;carrying=0;currentStore=-1;
         totalSales=0;completedOrders=0;eventVisitDay=0;contestEntry=-1;contestRound=0;contestScore=0;
-        fishermanPaidSeason=-1;wonContests=0;hasTruck=false;closedForDay=false;ended=false;
+        fishermanPaidSeason=-1;wonContests=0;hasTruck=false;closedForDay=false;ended=false;endless=false;
         relation=n.relation;System.arraycopy(carry,0,relation,33,8);
         introduced=n.introduced;stock=n.stock;marketStock=n.marketStock;
         caseActive=n.caseActive;staffEmployed=n.staffEmployed;receivedDecor=n.receivedDecor;equippedDecor=n.equippedDecor;
