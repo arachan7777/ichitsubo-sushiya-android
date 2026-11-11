@@ -78,6 +78,7 @@ public final class SushiActivity extends Activity {
             j.put("contestRound",game.contestRound);j.put("contestScore",game.contestScore);
             j.put("fishermanPaidSeason",game.fishermanPaidSeason);j.put("wonContests",game.wonContests);
             j.put("closedForDay",game.closedForDay);j.put("ended",game.ended);j.put("hasTruck",game.hasTruck);
+            j.put("endless",game.endless);
             j.put("log",game.log);
             j.put("relation",ints(game.relation));j.put("stock",ints(game.stock));
             j.put("introduced",bools(game.introduced));j.put("caseActive",bools(game.caseActive));
@@ -92,7 +93,10 @@ public final class SushiActivity extends Activity {
     }
     private JSONObject customerJson(SushiWorld.Customer c)throws Exception{
         JSONObject j=new JSONObject();j.put("index",c.index);j.put("wait",c.wait);j.put("stay",c.stay);
-        j.put("charge",c.charge);j.put("servedPieces",c.servedPieces);j.put("extra",c.extra);return j;
+        j.put("charge",c.charge);j.put("servedPieces",c.servedPieces);j.put("extra",c.extra);
+        j.put("extended",c.extended);j.put("leaveAt",c.leaveAt);
+        j.put("canAdditionalOrder",c.canAdditionalOrder);j.put("bonusOmakase",c.bonusOmakase);
+        return j;
     }
     private static JSONArray ints(int[] a){JSONArray j=new JSONArray();for(int v:a)j.put(v);return j;}
     private static JSONArray bools(boolean[] a){JSONArray j=new JSONArray();for(boolean v:a)j.put(v);return j;}
@@ -107,7 +111,11 @@ public final class SushiActivity extends Activity {
     private SushiWorld.Customer customer(JSONObject j)throws Exception{
         SushiWorld.Customer c=new SushiWorld.Customer(j.getInt("index"));
         c.wait=j.getInt("wait");c.stay=j.getInt("stay");c.charge=j.getInt("charge");
-        c.servedPieces=j.getInt("servedPieces");c.extra=j.getBoolean("extra");return c;
+        c.servedPieces=j.getInt("servedPieces");c.extra=j.optBoolean("extra",false);
+        c.extended=j.optBoolean("extended",false);c.leaveAt=j.optInt("leaveAt",30);
+        c.canAdditionalOrder=j.optBoolean("canAdditionalOrder",false);
+        c.bonusOmakase=j.optBoolean("bonusOmakase",false);
+        return c;
     }
     private SushiWorld restore(){
         String raw=getPreferences(MODE_PRIVATE).getString("sushi_state","");
@@ -123,6 +131,7 @@ public final class SushiActivity extends Activity {
             s.contestRound=j.getInt("contestRound");s.contestScore=j.getInt("contestScore");
             s.fishermanPaidSeason=j.getInt("fishermanPaidSeason");s.wonContests=j.getInt("wonContests");
             s.closedForDay=j.getBoolean("closedForDay");s.ended=j.getBoolean("ended");s.hasTruck=j.getBoolean("hasTruck");
+            s.endless=j.optBoolean("endless",false);
             s.log=j.optString("log","");
             readInts(j,"relation",s.relation);readInts(j,"stock",s.stock);
             readBools(j,"introduced",s.introduced);readBools(j,"caseActive",s.caseActive);
@@ -188,7 +197,7 @@ public final class SushiActivity extends Activity {
             if(game.seated.isEmpty())caption("客席はまだ空いている。");
             for(SushiWorld.Customer c:new ArrayList<>(game.seated)){
                 String text=c.name()+"  Lv"+game.level(c.index)+"  "+game.tier(c.index)
-                    +"  "+(c.servedPieces==0?"未注文":c.servedPieces+"貫提供済み");
+                    +"  "+(c.servedPieces==0?"注文待ち":c.bonusOmakase||c.canAdditionalOrder?"追加4貫の注文！":c.servedPieces+"貫提供済み");
                 add(text,()->customerDialog(c));
             }
             if(!game.queue.isEmpty()){
@@ -293,8 +302,17 @@ public final class SushiActivity extends Activity {
         String info=c.name()+"\n常連度 Lv"+game.level(c.index)+"（"+game.relation[c.index]+"点）"
             +"\n好物："+(fav==null?"不明":fav.name)
             +"\n既に提供した寿司："+c.servedPieces+"貫";
+        if(!game.seated.contains(c)){toast("そのお客は既に退店した。");return;}
+        if(c.bonusOmakase||c.canAdditionalOrder){
+            new AlertDialog.Builder(this).setTitle("おまかせ4貫の追加注文")
+                .setMessage(info+"\n\n追加の寿司4貫を握ることができる。")
+                .setPositiveButton("追加注文を受ける",(d,w)->orderDialog(c,true))
+                .setNegativeButton("戻る",null).show();
+            return;
+        }
         if(c.servedPieces>0){
-            new AlertDialog.Builder(this).setTitle(c.name()).setMessage(info).setPositiveButton("戻る",null).show();
+            new AlertDialog.Builder(this).setTitle(c.name()).setMessage(info)
+                .setPositiveButton("戻る",null).show();
             return;
         }
         new AlertDialog.Builder(this).setTitle("ご注文を承ります")
@@ -316,6 +334,7 @@ public final class SushiActivity extends Activity {
         scene.setCooking(true);
         TimingView view=new TimingView(this,order.difficultyRank,result->{
             int gained=game.serve(customer,order,result);
+            if(gained==0){changed();toast("注文の処理に失敗した。お客が退店したか、ネタが不足している。");return;}
             String report=customer.name()+"に"+order.pieces+"貫を提供。\n"
                 +(result==2?"大成功！":result==1?"成功！":"失敗…")
                 +"\n関係値 "+(gained>=0?"+":"")+gained;
@@ -415,7 +434,8 @@ public final class SushiActivity extends Activity {
             for(int i=0;i<ids.length;i++)ids[i]=own.get(i);
             game.beginNextRun(ids);changed();
         });
-        caption("このまま無期限に営業を続ける仕様は未実装。現在は周回のみ確認できる。");
+        add("この寿司屋で、そのまま営業を続ける",()->{game.continueEndless();changed();});
+        caption("周回する場合はイベント限定客の関係値と選んだ装飾品だけを引き継ぐ。");
     }
     private void contestTiming(){
         if(game.contestEntry<0)return;
