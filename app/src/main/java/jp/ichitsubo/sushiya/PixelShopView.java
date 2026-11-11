@@ -35,6 +35,7 @@ public final class PixelShopView extends View {
     private SushiWorld world;
     private TapListener listener;
     private boolean outside=false;
+    private boolean cooking=false;
     private long flashAt=0;
     private int flashColor=0;
     public PixelShopView(Context context,SushiWorld game){
@@ -54,6 +55,7 @@ public final class PixelShopView extends View {
         arrival.keySet().retainAll(now);
         invalidate();
     }
+    public void setCooking(boolean active){cooking=active;invalidate();}
     public void pulse(boolean success){
         flashColor=success?0xff71d6a2:0xffed9e74;
         flashAt=SystemClock.uptimeMillis();invalidate();
@@ -148,7 +150,7 @@ public final class PixelShopView extends View {
         r(0xff91b8b2,17,140,326,23);
         for(int i=0;i<9;i++)sushi(21+i*36,149,i,ms);
         // chef behind glass
-        int beat=(int)Math.round(Math.sin(ms/240.0)*2);
+        int beat=(int)Math.round(Math.sin(ms/(cooking?135.0:440.0))* (cooking?4:1));
         person(0,168,98+beat,true,false,ms);
         r(0xffe4b382,195,141,34,4);
         r(0xfff4eee2,204,139,15,3);
