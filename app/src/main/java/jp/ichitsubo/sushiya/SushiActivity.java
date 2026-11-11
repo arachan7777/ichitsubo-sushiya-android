@@ -32,6 +32,64 @@ public final class SushiActivity extends Activity {
     private TextView headline,logView;
     private PixelShopView scene;
     private String tab="店内";
+    private android.app.AlertDialog activePanel;
+    private boolean outside=false, automatic=false;
+    private long nextQuarterAt=0L;
+    private final android.os.Handler gameClock=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable clockTick=new Runnable(){
+        @Override public void run(){
+            long now=android.os.SystemClock.elapsedRealtime();
+            if(automatic && game!=null && activePanel==null && !game.ended &&
+                game.currentStore<0 && !game.closedForDay &&
+                game.minute>=game.restaurantStart && game.minute<game.restaurantEnd){
+                if(nextQuarterAt==0)nextQuarterAt=now+15000L;
+                if(now>=nextQuarterAt){
+                    game.advanceQuarter();nextQuarterAt=now+15000L;
+                    if(game.minute>=game.restaurantEnd)automatic=false;
+                    changed();
+                }
+            }else nextQuarterAt=0L;
+            gameClock.postDelayed(this,300);
+        }
+    };
+    @Override protected void onResume(){super.onResume();gameClock.postDelayed(clockTick,300);}
+    private void stopClock(){automatic=false;nextQuarterAt=0L;}
+    private void dismissPanel(){
+        if(activePanel!=null){android.app.AlertDialog d=activePanel;activePanel=null;d.dismiss();}
+    }
+    private void openPanel(String name){
+        stopClock();dismissPanel();
+        LinearLayout original=menu;
+        LinearLayout panel=new LinearLayout(this);
+        panel.setPadding(dp(8),dp(2),dp(8),dp(8));
+        panel.setOrientation(LinearLayout.VERTICAL);
+        menu=panel;
+        if(name.equals("魚屋"))showMarkets();
+        else if(name.equals("常連"))showPeople();
+        else showManagement();
+        menu=original;
+        ScrollView scroll=new ScrollView(this);
+        scroll.addView(panel);
+        activePanel=new AlertDialog.Builder(this)
+            .setTitle(name.equals("魚屋")?"今日の仕入れ":name.equals("常連")?"常連・横丁の人々":"寿司屋の経営")
+            .setView(scroll).setNegativeButton("店内に戻る",null).create();
+        activePanel.setOnDismissListener(d->activePanel=null);
+        activePanel.show();
+        if(activePanel.getWindow()!=null)
+            activePanel.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels*.94),-2);
+    }
+    private void chooseCustomer(){
+        stopClock();
+        if(game.seated.isEmpty()){toast("今は客席が空いている。営業を進めるとお客が訪れる。");return;}
+        String[] choices=new String[game.seated.size()];
+        for(int i=0;i<choices.length;i++){
+            SushiWorld.Customer c=game.seated.get(i);
+            choices[i]=c.name()+"  "+(c.servedPieces==0?"注文を待っている":c.servedPieces+"貫提供済み");
+        }
+        new AlertDialog.Builder(this).setTitle("接客するお客を選ぶ")
+            .setItems(choices,(d,i)->customerDialog(game.seated.get(i)))
+            .setNegativeButton("閉じる",null).show();
+    }
     private static final int BG=0xfff2e8d4, INK=0xff203e40, PRIMARY=0xff355d59, ACCENT=0xffb96542, CARD=0xfffff7e7;
     @Override public void onCreate(Bundle b){
         super.onCreate(b);getWindow().setStatusBarColor(INK);getWindow().setNavigationBarColor(INK);
@@ -143,83 +201,82 @@ public final class SushiActivity extends Activity {
         }catch(Exception e){android.util.Log.e("SushiSave","load",e);}
         return s;
     }
-    private void changed(){persist();render(false);}
+    private void changed(){dismissPanel();persist();render(false);}
     private void render(boolean reset){
         if(reset){
             ScrollView scroll=new ScrollView(this);
             scroll.setFillViewport(true);scroll.setBackgroundColor(BG);
-            body=new LinearLayout(this);body.setPadding(dp(10),dp(6),dp(10),dp(18));body.setOrientation(LinearLayout.VERTICAL);
+            body=new LinearLayout(this);body.setPadding(dp(8),dp(5),dp(8),dp(16));body.setOrientation(LinearLayout.VERTICAL);
             scroll.addView(body);setContentView(scroll);
-            TextView title=label("🍣 一坪寿司屋",26,INK,true);title.setGravity(Gravity.CENTER);
-            body.addView(title);
+            TextView title=label("🍣 一坪寿司屋",24,INK,true);
+            title.setGravity(Gravity.CENTER);body.addView(title);
+            headline=label("",14,INK,true);
+            headline.setGravity(Gravity.CENTER);
+            headline.setBackground(bg(CARD,0,8));body.addView(headline);
             scene=new PixelShopView(this,game);
-            scene.setCustomerTapListener(this::customerDialog);
-            body.addView(scene,new LinearLayout.LayoutParams(-1,dp(235)));
-            headline=label("",14,INK,true);headline.setBackground(bg(CARD,0,5));body.addView(headline);
-            logView=label("",13,0xff825436,false);body.addView(logView);
+            scene.setTapListener(new PixelShopView.TapListener(){
+                @Override public void onGuest(SushiWorld.Customer c){stopClock();customerDialog(c);}
+                @Override public void onCounter(){chooseCustomer();}
+                @Override public void onDoor(){stopClock();outside=!outside;scene.setOutside(outside);}
+            });
+            body.addView(scene,new LinearLayout.LayoutParams(-1,dp(270)));
+            logView=label("",13,0xff825436,false);
+            logView.setMinHeight(dp(54));logView.setGravity(Gravity.CENTER_VERTICAL);
+            body.addView(logView);
             LinearLayout nav=row();
-            for(String name:new String[]{"店内","魚屋","常連","経営"}){
-                final String target=name;Button b=button(name,()->{tab=target;changed();},ACCENT);
+            String[] tabs={"🐟仕入れ","👥常連","🏠経営","🚶店外"};
+            for(int i=0;i<tabs.length;i++){
+                final int idx=i;Button b=button(tabs[i],()->{
+                    if(idx==3){stopClock();outside=!outside;scene.setOutside(outside);}
+                    else openPanel(idx==0?"魚屋":idx==1?"常連":"経営");
+                },ACCENT);
+                b.setTextSize(12);
                 nav.addView(b,new LinearLayout.LayoutParams(0,dp(44),1));
             }
             body.addView(nav);
             menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);body.addView(menu);
         }
-        scene.update(game,tab.equals("魚屋")?1:0);
-        headline.setText("第"+game.run+"周   "+game.date()+"   "+game.time()
+        scene.update(game,outside?1:0);
+        headline.setText("第"+game.run+"周  "+game.date()+"  "+game.time()
             +"\n所持金 "+String.format(Locale.JAPAN,"%,d",game.yen)+"円"
-            +"   関係スコア "+String.format(Locale.JAPAN,"%,d",game.score())+"点");
+            +"   常連スコア "+String.format(Locale.JAPAN,"%,d",game.score())+"点");
         logView.setText("✦ "+game.log);
         menu.removeAllViews();
         if(game.ended){showEnd();return;}
-        if(tab.equals("店内"))showRestaurant();
-        else if(tab.equals("魚屋"))showMarkets();
-        else if(tab.equals("常連"))showPeople();
-        else showManagement();
+        showRestaurant();
     }
     private void showRestaurant(){
-        header("寿司屋の営業");
-        caption("席 "+game.seated.size()+"/"+game.seats()+"  行列 "+game.queue.size()+"/"+game.queueCapacity()
-               +"  注文累計 "+game.completedOrders+"件");
         if(game.currentStore>=0){
-            caption("買い出し中。魚屋画面から仕入れを終えて戻れる。");
-            add("魚屋へ戻る",()->{tab="魚屋";changed();});return;
+            caption(SushiWorld.STORE_NAMES[game.currentStore]+"で買い出し中");
+            add("🐟 魚屋でネタを選ぶ",()->openPanel("魚屋"));
+            return;
         }
         if(game.minute<game.restaurantStart&&!game.closedForDay){
-            add("営業開始（"+String.format(Locale.JAPAN,"%02d:%02d",game.restaurantStart/60,game.restaurantStart%60)+"）",()->{
-                game.minute=game.restaurantStart;game.log="暖簾を掲げ、営業を始めた。";changed();
+            caption("仕入れとネタケースを準備して、暖簾を掲げる。");
+            two("🐟 魚屋へ",()->openPanel("魚屋"),
+                "🍣 ネタケース",()->{stopClock();caseDialog();});
+            add("暖簾を出して開店（"+String.format(Locale.JAPAN,"%02d:%02d",
+                game.restaurantStart/60,game.restaurantStart%60)+"）",()->{
+                game.minute=game.restaurantStart;game.log="暖簾を掲げた。今日の営業が始まる。";changed();
             });
-        }
-        if(game.minute>=game.restaurantStart&&game.minute<game.restaurantEnd&&!game.closedForDay){
-            add("ゲーム内15分進める・来客を迎える",()->{game.advanceQuarter();changed();});
-            caption("画面のドット絵のお客をタップ、または下の名前を選ぶと注文を受けられる。"
-                +"\n針を中央の緑色で止めると寿司が大成功する。");
-            if(game.seated.isEmpty())caption("客席はまだ空いている。");
-            for(SushiWorld.Customer c:new ArrayList<>(game.seated)){
-                String text=c.name()+"  Lv"+game.level(c.index)+"  "+game.tier(c.index)
-                    +"  "+(c.servedPieces==0?"注文待ち":c.bonusOmakase||c.canAdditionalOrder?"追加4貫の注文！":c.servedPieces+"貫提供済み");
-                add(text,()->customerDialog(c));
-            }
-            if(!game.queue.isEmpty()){
-                header("店の外で待つお客");
-                for(SushiWorld.Customer c:game.queue)
-                    caption("・"+c.name()+"  待機残り "+c.wait+"分");
-            }
-        }
-        if(game.minute>=game.restaurantEnd||game.closedForDay){
-            add("次の日へ（仕入れは午前8～10時）",()->{
-                if(!game.closedForDay)game.closePayroll();
-                else game.closePayroll();
-                game.nextDay();changed();
+        }else if(game.minute>=game.restaurantStart&&game.minute<game.restaurantEnd&&!game.closedForDay){
+            caption("客席 "+game.seated.size()+"/"+game.seats()+"  行列 "+
+                game.queue.size()+"/"+game.queueCapacity()+
+                "。お客のドット絵をタップすると注文を受けられる。");
+            add(automatic?"⏸ 自動営業を止める":"▶ 自動営業（現実15秒＝ゲーム内15分）",()->{
+                automatic=!automatic;nextQuarterAt=0L;changed();
             });
-        }
-        if(game.minute<game.restaurantStart){
-            caption("午前8～10時に魚屋で仕入れが可能。玉子は常に無料で握れる。");
-            two("魚屋へ",()->{tab="魚屋";changed();},"ネタケース",this::caseDialog);
-        }else small("ネタケースを管理する",this::caseDialog);
-        if(game.contestEntry>=0){
-            header("参加中の寿司大会");
-            add("課題"+(game.contestRound+1)+"/4・ランク"+game.contestRank()+"を握る",this::contestTiming);
+            two("⏩ 15分進める",()->{stopClock();game.advanceQuarter();changed();},
+                "👤 お客を選ぶ",this::chooseCustomer);
+            if(game.contestEntry>=0)
+                small("🏆 寿司大会の課題 "+(game.contestRound+1)+"/4",()->{stopClock();contestTiming();});
+            small("🍣 ネタケースを管理",()->{stopClock();caseDialog();});
+        }else{
+            stopClock();
+            caption("本日の営業が終了した。");
+            add("🌅 翌日の横丁へ",()->{
+                game.closePayroll();game.nextDay();changed();
+            });
         }
     }
     private void showMarkets(){
