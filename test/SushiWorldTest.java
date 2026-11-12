@@ -15,6 +15,30 @@ public final class SushiWorldTest {
     check(g.seats()==4&&g.fridgeCapacity()==500&&g.caseCapacity()==10,"初期の店");
     check(g.score()==7300,"初期の関係スコア");
     check(g.market(0,Catalog.fishIndex(60))==0,"玉子は無料供給");
+    // Regression: first-day fish buying must work without advancing the game.
+    SushiWorld firstDay=new SushiWorld();
+    check(firstDay.minute==480 && firstDay.currentStore==-1,"初日8時に買い出し可能");
+    int initialProducts=0,cheapest=-1;
+    for(int i=0;i<85;i++)if(firstDay.market(0,i)>0){
+      initialProducts++;
+      if(cheapest<0||firstDay.buyPrice(Catalog.FISH[i])<firstDay.buyPrice(Catalog.FISH[cheapest]))cheapest=i;
+    }
+    check(initialProducts>=15&&initialProducts<=25,"初日のサブちゃんの店頭は15-25種類");
+    check(cheapest>=0&&firstDay.buyPrice(Catalog.FISH[cheapest])<=firstDay.yen,"初日購入可能なネタがある");
+    check(firstDay.visit(0),"初日にサブちゃんの魚屋に入れる");
+    check(firstDay.currentStore==0 && firstDay.visitCount==1,"訪問直後に魚屋に滞在する");
+    int originalMoney=firstDay.yen,unitPrice=firstDay.buyPrice(Catalog.FISH[cheapest]);
+    check(firstDay.buy(cheapest,1,false),"初日に10貫購入できる");
+    check(firstDay.buy(cheapest,1,false),"初日に同じ魚屋で続けて購入できる");
+    check(firstDay.stock[cheapest]==20 && firstDay.carrying==20,"購入量と積載量が一致");
+    check(firstDay.yen==originalMoney-unitPrice*2,"購入分の代金のみ減る");
+    check(firstDay.caseActive[cheapest],"買った魚がネタケースに表示される");
+    firstDay.returnStore();
+    check(firstDay.currentStore==-1 && firstDay.visitCount==1,"購入後に店へ戻れる");
+    check(!firstDay.visit(0),"自転車の訪問は1日1軒");
+    firstDay.minute=1080;
+    firstDay.advanceQuarter();
+    check(firstDay.minute==1095,"仕入れ後に営業を開始できる");
     check(g.visit(0),"初期魚屋訪問");
     int fi=-1;for(int i=0;i<85;i++)if(g.market(0,i)>0){fi=i;break;}
     check(fi>=0,"魚屋の品揃え");
