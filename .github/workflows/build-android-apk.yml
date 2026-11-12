@@ -63,6 +63,19 @@ jobs:
             app/src/main/java/jp/ichitsubo/sushiya/SushiWorld.java \
             test/SushiWorldTest.java
           java -cp .build/worldtest SushiWorldTest
+      - name: 仕入れの数量選択が表示されるコード検査
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('app/src/main/java/jp/ichitsubo/sushiya/SushiActivity.java').read_text()
+          choice = text.split('private void choosePurchase(int index){',1)[1].split('private void caseDialog(){',1)[0]
+          assert '.setItems(options,' in choice, '仕入れ数量の選択肢がない'
+          assert '.setMessage(' not in choice, '説明文が選択肢を隠してしまう'
+          assert 'int[] qty={10,20,50,100,200};' in choice, '5種類の購入数量がない'
+          assert 'openPanel("魚屋");' in choice, '購入後に魚屋へ戻れない'
+          print('PASS: 購入数量リストが隠れず表示される画面構成')
+          PY
       - name: デバッグ用APKをビルド
         shell: bash
         run: gradle --no-daemon :app:assembleDebug --stacktrace
@@ -77,16 +90,16 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | head -n 10
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | grep "package: name='jp.ichitsubo.sushiya.playable031'"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | grep "package: name='jp.ichitsubo.sushiya.playable032'"
       - name: ブラウザで直接取得できる試遊版を公開
         if: github.event_name == 'push'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.3.1-test app/build/outputs/apk/debug/app-debug.apk \
+          gh release create v0.3.2-test app/build/outputs/apk/debug/app-debug.apk \
             --target "$GITHUB_SHA" \
-            --title "一坪寿司屋 v0.3.1（初日仕入れ修正版）" \
+            --title "一坪寿司屋 v0.3.2（仕入れ数量表示の修正版）" \
             --notes "Android用の試遊版APKです。店内ドット絵・お客の操作・寿司調理などを実装しています。未完成の機能と実機での未確認事項があります。ZIPの解凍は不要です。" \
             --prerelease
 
