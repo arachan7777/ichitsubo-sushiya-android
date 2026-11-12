@@ -7,7 +7,7 @@ on:
       - '.github/build-trigger.txt'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-apk-manual
@@ -78,6 +78,18 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | head -n 10
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | grep "package: name='jp.ichitsubo.sushiya.playable03'"
+      - name: ブラウザで直接取得できる試遊版を公開
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.3.0-test app/build/outputs/apk/debug/app-debug.apk \
+            --target "$GITHUB_SHA" \
+            --title "一坪寿司屋 v0.3.0（Android試遊版）" \
+            --notes "Android用の試遊版APKです。店内ドット絵・お客の操作・寿司調理などを実装しています。未完成の機能と実機での未確認事項があります。ZIPの解凍は不要です。" \
+            --prerelease
+
       - name: スマホへインストールするAPKを保存
         uses: actions/upload-artifact@v4
         with:
