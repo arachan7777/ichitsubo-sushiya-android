@@ -73,7 +73,7 @@ public final class SushiActivity extends Activity {
         activePanel=new AlertDialog.Builder(this)
             .setTitle(name.equals("魚屋")?"今日の仕入れ":name.equals("常連")?"常連・横丁の人々":"寿司屋の経営")
             .setView(scroll).setNegativeButton("店内に戻る",null).create();
-        activePanel.setOnDismissListener(d->activePanel=null);
+        activePanel.setOnDismissListener(d->{ if(activePanel==d)activePanel=null; });
         activePanel.show();
         if(activePanel.getWindow()!=null)
             activePanel.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels*.94),-2);
@@ -281,36 +281,75 @@ public final class SushiActivity extends Activity {
     }
     private void showMarkets(){
         header("横丁の魚屋へ買い出し");
-        caption("午前8:00～10:00だけ。自転車1店舗・200貫／軽トラック2店舗・400貫。"
-            +"\n今日の訪問 "+game.visitCount+"/"+(game.hasTruck?2:1)
-            +"、自分で運ぶ量 "+game.carrying+"/"+(game.hasTruck?400:200)+"貫相当");
+        caption("午前8:00～10:00。自転車は1日1店舗・200貫まで。"
+            +"\n訪問 "+game.visitCount+"/"+(game.hasTruck?2:1)
+            +"　持ち帰り "+game.carrying+"/"+(game.hasTruck?400:200)+"貫"
+            +"\n所持金 "+String.format(Locale.JAPAN,"%,d",game.yen)+"円"
+            +"　冷蔵庫 "+game.totalStock()+"/"+game.fridgeCapacity()+"貫");
         if(game.currentStore<0){
-            for(int i=0;i<4;i++){
-                final int k=i;
-                String caption=game.hasStore(i)?"":"（紹介されると解放）";
-                add(SushiWorld.STORE_NAMES[i]+caption,()->{
-                    if(!game.visit(k))toast("この魚屋にはまだ行けない。紹介条件・時間帯・訪問回数を確認。");
-                    else changed();
-                });
+            if(game.minute<480||game.minute>=600){
+                caption("買い出しは朝8時から10時まで。");return;
             }
-            if(game.minute<600&&game.visitCount>0)small("買い出しを終えて店へ戻る（10:00）",()->{game.minute=600;tab="店内";changed();});
-            if(game.minute>=600)caption("今日の買い出し時間は終了した。");
+            boolean any=false;
+            for(int i=0;i<4;i++){
+                final int id=i;
+                if(game.hasStore(i)){
+                    any=true;
+                    add("🐟 "+SushiWorld.STORE_NAMES[i]+"へ行く",()->{
+                        if(!game.visit(id)){
+                            toast("今日はもう訪問できない。時刻または訪問回数を確認。");
+                            return;
+                        }
+                        // Keep the store screen open after visiting. Do not strand
+                        // the player at the shop with the only visit consumed.
+                        changed();
+                        openPanel("魚屋");
+                    });
+                }else caption("🔒 "+SushiWorld.STORE_NAMES[i]+"（紹介で解放）");
+            }
+            if(game.visitCount>0)
+                small("買い出しを終えて寿司屋へ（10:00）",()->{
+                    game.minute=600;
+                    game.log="魚屋の仕入れを終えて寿司屋に戻った。";
+                    changed();
+                });
+            if(!any)caption("訪問できる仕入れ先がない。");
             return;
         }
         int store=game.currentStore;
-        header(SushiWorld.STORE_NAMES[store]);
-        small("この魚屋から寿司屋に戻る",()->{game.returnStore();changed();});
-        caption("各ネタ200貫分が店頭在庫。1回の購入は10貫相当。旬は仕入れ値20％引き。"
-               +"\n配送解放："+(game.deliveryUnlocked(store)?"あり（本人Lv5）":"なし（本人Lv5で解放）"));
+        header("🐟 "+SushiWorld.STORE_NAMES[store]);
+        int products=0;
+        for(int i=0;i<85;i++)if(game.market(store,i)>=10)products++;
+        caption("本日の入荷 "+products+"種類。魚を選んで10貫単位で仕入れる。"
+            +"\n旬は仕入れ値20％引き。"
+            +"\n配達："+(game.deliveryUnlocked(store)?"解放済み":"未解放"));
+        add("🐟 ネタを選んで購入する",this::selectMarketFish);
+        small("この魚屋から寿司屋へ戻る",()->{
+            game.returnStore();
+            changed();
+            if(game.visitCount<(game.hasTruck?2:1)&&game.minute<600)openPanel("魚屋");
+        });
+    }
+    private void selectMarketFish(){
+        if(game.currentStore<0){openPanel("魚屋");return;}
+        int store=game.currentStore;
+        List<Integer> fish=new ArrayList<>();
+        List<String> items=new ArrayList<>();
         for(int i=0;i<85;i++){
             if(game.market(store,i)<10)continue;
-            final int fi=i;Catalog.Fish f=Catalog.FISH[i];
-            String text=f.name+"（ランク"+f.rank+"）  "+game.buyPrice(f)+"円/10貫"
-                +"  在庫"+game.market(store,i)+"貫";
-            add(text,()->choosePurchase(fi));
+            Catalog.Fish f=Catalog.FISH[i];
+            fish.add(i);
+            items.add((f.inSeason(game.season())?"旬！ ":"")+"★"+f.rank+" "
+                +f.name+" / 10貫 "+String.format(Locale.JAPAN,"%,d",game.buyPrice(f))+"円"
+                +" / 残"+game.market(store,i)+"貫");
         }
+        if(items.isEmpty()){toast("この魚屋の販売在庫は売り切れた。");return;}
+        new AlertDialog.Builder(this).setTitle("仕入れるネタを選ぶ（"+items.size()+"種類）")
+            .setItems(items.toArray(new String[0]),(d,index)->choosePurchase(fish.get(index)))
+            .setNegativeButton("魚屋に戻る",null).show();
     }
     private void choosePurchase(int index){
+        if(game.currentStore<0){toast("魚屋にいないため購入できない。");return;}
         Catalog.Fish f=Catalog.FISH[index];
         int[] qty={10,20,50,100,200};
         boolean delivery=game.deliveryUnlocked(game.currentStore);
@@ -319,19 +358,25 @@ public final class SushiActivity extends Activity {
         for(int i=0;i<count;i++){
             int units=qty[i%qty.length]/10;
             boolean shipping=delivery&&i>=qty.length;
-            options[i]=qty[i%qty.length]+"貫分  "+String.format(Locale.JAPAN,"%,d",game.buyPrice(f)*units)
-                +"円"+(shipping?"（配達）":"（持ち帰り）");
+            options[i]=qty[i%qty.length]+"貫分　"
+                +String.format(Locale.JAPAN,"%,d",game.buyPrice(f)*units)+"円"
+                +(shipping?"（配達）":"（持ち帰り）");
         }
         new AlertDialog.Builder(this).setTitle(f.name+"の仕入れ")
-            .setMessage("数量と運び方を選択。持ち帰りは積載量、配達は本人との関係条件が必要。")
+            .setMessage("希望する数量と運び方を選ぶ。1回の購入は10貫単位。")
             .setItems(options,(d,i)->{
                 int units=qty[i%qty.length]/10;
                 boolean shipping=delivery&&i>=qty.length;
-                if(!game.buy(index,units,shipping))
-                    toast("購入できない。所持金、冷蔵庫容量、積載量、店頭在庫を確認。");
-                else changed();
+                if(!game.buy(index,units,shipping)){
+                    toast("購入できない。残金・冷蔵庫容量・積載量・店頭在庫を確認。");
+                    return;
+                }
+                changed();
+                // Remain at the same fish market for repeat purchases.
+                openPanel("魚屋");
             })
-            .setNegativeButton("戻る",null).show();
+            .setNegativeButton("ネタ一覧に戻る",(d,i)->selectMarketFish())
+            .show();
     }
     private void caseDialog(){
         final AlertDialog[] activeDialog={null};
