@@ -4,11 +4,11 @@ android {
     namespace 'jp.ichitsubo.sushiya'
     compileSdk 35
     defaultConfig {
-        applicationId 'jp.ichitsubo.sushiya.playable031'
+        applicationId 'jp.ichitsubo.sushiya.playable032'
         minSdk 26
         targetSdk 35
-        versionCode 4
-        versionName '0.3.1'
+        versionCode 5
+        versionName '0.3.2'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
