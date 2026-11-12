@@ -362,8 +362,10 @@ public final class SushiActivity extends Activity {
                 +String.format(Locale.JAPAN,"%,d",game.buyPrice(f)*units)+"円"
                 +(shipping?"（配達）":"（持ち帰り）");
         }
-        new AlertDialog.Builder(this).setTitle(f.name+"の仕入れ")
-            .setMessage("希望する数量と運び方を選ぶ。1回の購入は10貫単位。")
+        // A message and item list cannot coexist in a standard Android AlertDialog:
+        // setMessage() takes the scrolling region and suppresses setItems().
+        // Keep the guidance in the title and render the quantities as tappable rows.
+        new AlertDialog.Builder(this).setTitle(f.name+"｜購入数量を選ぶ（10貫単位）")
             .setItems(options,(d,i)->{
                 int units=qty[i%qty.length]/10;
                 boolean shipping=delivery&&i>=qty.length;
